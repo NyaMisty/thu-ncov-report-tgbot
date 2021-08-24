@@ -1,6 +1,8 @@
 import re
 from typing import Dict, Optional
 import logging
+
+import json5
 import requests
 import logging
 import json
@@ -24,92 +26,55 @@ def match_re_group1(re_str: str, text: str) -> str:
 
     return match.group(1)
 
-def extract_post_data(html: str, old_data=None) -> Dict[str, str]:
+def extract_post_data(html: str) -> Dict[str, str]:
     """
     从上报页面的 HTML 中，提取出上报 API 所需要填写的参数。
     :return: 最终 POST 的参数（使用 dict 表示）
     """
-    new_data = match_re_group1(r'var def = (\{.+\});', html)
-    if old_data == None:
-        old_data = match_re_group1(r'oldInfo: (\{.+\}),', html)
+    data = match_re_group1(r'<script type="text/tpl" id="dcstr">(.*?)</script>', html)
+    if data == None:
+        pass
 
     # 检查数据是否足够长
-    if len(old_data) < REASONABLE_LENGTH or len(new_data) < REASONABLE_LENGTH:
-        _logger.debug(f'\nold_data: {old_data}\nnew_data: {new_data}')
+    if len(data) < REASONABLE_LENGTH:
+        _logger.debug(f'\ndata: {data}')
         raise ValueError('获取到的数据过短。请阅读脚本文档的“使用前提”部分')
 
-    old_data, new_data = json.loads(old_data), json.loads(new_data)
+    data = json5.loads(data)
 
-    # 需要从 new dict 中提取如下数据
-    PICK_PROPS = (
-        'id', 'uid', 'date', 'created',
-    )
+    rows = re.findall(r'<.*?databind="(.*?)".*?dojotype="(.*?)".*?presetbind="(.*?)".*?>', html)
+    if not rows:
+        _logger.debug(f'\nerroneous data: {data}')
+        raise ValueError('无法获取表单数据。请阅读脚本文档的“使用前提”部分')
 
-    for prop in PICK_PROPS:
-        val = new_data.get(prop, ...)
-        if val is ...:
-            raise RuntimeError(f'从网页上提取的 new data 中缺少属性 {prop}，可能网页已经改版。')
-        old_data[prop] = val
+    basedata_stores = data['body']['dataStores']
+    datastore_namedict = { c['rowSetName']: c for c in basedata_stores.values() if 'rowSetName' in c}
+    presetsDict = {c['name']: c['value'] for c in data['body']['dataStores']['variable']['rowSet']['primary']}
 
-    SANITIZE_PROPS = {
-        'ismoved': 0,
-        'jhfjrq': '',
-        'jhfjjtgj': '',
-        'jhfjhbcc': '',
-        'sfxk': 0,
-        'xkqq': '',
-        'szgj': '',
-        'szcs': '',
-        # Moved info sanitize
-        'sfsfbh': 0,
-        'xjzd': '',
-        'bztcyy': '',
-        'zgfxdq': 0,
-        'mjry': 0,
-        'csmjry': 0,
-        # Misc info sanitize
-        'gwszdd': '',
-        'sfyqjzgc': '',
-    }
-    old_data.update(SANITIZE_PROPS)
+    for row in rows:
+        databind = row[0]
+        dojotype = row[1]
+        presetbind = row[2]
 
-    try:
-        if len(old_data['address']) == 0 \
-        or (
-            len(old_data['city']) == 0 \
-            and old_data['province'] in ['北京市','上海市','重庆市','天津市']
-        ):
-            geo_info = json.loads(old_data['geo_api_info'])
-            old_data['address'] = geo_info['formattedAddress']
-            old_data['province'] = geo_info['addressComponent']['province']
-            if old_data['province'] in ['北京市','上海市','重庆市','天津市']:
-                old_data['city'] = geo_info['addressComponent']['province']
-            else:
-                old_data['city'] = geo_info['addressComponent']['city']
-            old_data['area'] = ' '.join([old_data['province'], old_data['city'], geo_info['addressComponent']['district']])
-    except json.decoder.JSONDecodeError as e:
-        raise RuntimeError(f'定位信息为空，自动修复地址信息失败。手动上报一次后方可正常使用。')
+        databind_entity, _, databind_field = databind.partition('.')
 
-    return old_data
+        datastore = datastore_namedict[databind_entity]
+        if not presetbind in presetsDict:
+            raise ValueError('已填写信息与待填信息格式不匹配。')
+        presetValue = presetsDict[presetbind]
+        if datastore['recordCount'] == 0:
+            datastore['recordCount'] += 1
+            datastore['rowSet']['primary'].append({})
 
-def build_xisu_ncov_checkin_post_data(ncov_report_page_html, xisu_nconv_checkin_pending_form):
-    ncov_report_post_data = extract_post_data(ncov_report_page_html)
+        datastore['rowSet']['primary'][0][databind_field] = presetValue
+        if dojotype == 'unieap.form.ComboBox':
+            datastore['rowSet']['primary'][0][databind_field + '_TEXT'] = presetValue
+            if not presetValue:
+                datastore['rowSet']['primary'][0][databind_field + '_TEXT'] = "请选择"
 
-    filled_form = xisu_nconv_checkin_pending_form['d']['info']
-    assert filled_form, f"报告页面 {XISU_HISTORY_DATA} 返回信息不正确，可能尚未填写过晨午晚检签到"
-    assert 'tw' in filled_form, f"报告页面 {XISU_HISTORY_DATA} 返回信息不正确"
+    for datastore in datastore_namedict.values():
+        datastore['rowSet']['primary'][0]['_o'] = list(datastore['rowSet']['primary'][0])
+        datastore['rowSet']['primary'][0]['_t'] = 3
 
-    del filled_form['date']
-    del filled_form['flag']
-    del filled_form['uid']
-    del filled_form['creator']
-    del filled_form['created']
-    del filled_form['id']
-
-    filled_form['area'] = ncov_report_post_data['area']
-    filled_form['city'] = ncov_report_post_data['city']
-    filled_form['province'] = ncov_report_post_data['province']
-    filled_form['address'] = ncov_report_post_data['address']
-    filled_form['geo_api_info'] = ncov_report_post_data['geo_api_info']
-
-    return filled_form
+    ret = json5.dumps(data)
+    return ret
