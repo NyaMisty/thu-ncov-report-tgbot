@@ -1,10 +1,10 @@
-# BUPT 2019-nCoV Report Bot
+# THU 2019-nCoV Report Bot
 
-[Click here to try Online](https://t.me/buptncovbot)
+[Click here to try Online](https://t.me/thuncovbot)
 
 ## Requirements
 
-- Python3 (dev with 3.7.4)
+- Python3 (dev with 3.8.6)
 - pip
 
 Run `pip install -r requirements.txt` to install required components.
@@ -23,12 +23,10 @@ You can change this behavior in `include/config.py`.
 
 Following step are proceed when checkin. 
 
-1. Extracts `oldInfo` and `def` from web page.
-2. Replace `id`, `uid`, `date`, and `created` in `oldInfo` by the ones in `def`.
-3. Sanitize these properties using default values:  
-`ismoved`, `jhfjrq`, `jhfjjtgj`, `jhfjhbcc`, `sfxk`, `xkqq`, `sfsfbh`, `ismoved`, `xjzd`, `bztcyy`.
-4. Pick `address`, `city`, `province`, `area` out from `geo_api_info` if they are empty.
-5. Post final data to saving API.
+1. Extracts "dcstr" text/tpl section from form HTML, which contains form template info
+2. Parse dcstr and retriving the previously input value (preset)
+3. Resolve databind and presetbind infos, and generate the final form data
+5. Post final data to form API.
 
 ## Contributing
 
@@ -36,4 +34,5 @@ Pull requests and issues are always welcome.
 
 ## Credit
 
+Special thanks to [HenryzhaoH/bupt-ncov-report-tgbot](https://github.com/HenryzhaoH/bupt-ncov-report-tgbot).
 Special thanks to [ipid/bupt-ncov-report](https://github.com/ipid/bupt-ncov-report).
