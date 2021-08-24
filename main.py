@@ -312,9 +312,10 @@ def checkin_all():
     logger.info("checkin_all finished!")
 
 def main():
-    global updater, scheduler
+    global logger, updater, scheduler
     parser = argparse.ArgumentParser(description='THU 2019-nCoV Report Bot')
     parser.add_argument('--initdb', default=False, action='store_true')
+    parser.add_argument('--verbose', default=False, action='store_true')
     args = parser.parse_args()
 
     database = SqliteDatabase(config.SQLITE_DB_FILE_PATH)
@@ -323,6 +324,21 @@ def main():
     if args.initdb:
         db_init()
         exit(0)
+
+    logging.basicConfig(
+        handlers=[
+            logging.handlers.TimedRotatingFileHandler(
+                "log/main", when='midnight', backupCount=30, encoding='utf-8',
+                atTime=datetime.time(hour=0, minute=0)
+            ),
+            logging.StreamHandler(sys.stdout)
+        ],
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.DEBUG if args.verbose else logging.INFO
+    )
+    logger = logging.getLogger(__name__)
+
+    scheduler = BackgroundScheduler(timezone=CRON_TIMEZONE)
 
     updater = Updater(TG_BOT_TOKEN, request_kwargs=TG_BOT_PROXY, use_context=True)
     # Get the dispatcher to register handlers
@@ -389,19 +405,4 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        handlers=[
-            logging.handlers.TimedRotatingFileHandler(
-                "log/main", when='midnight', backupCount=30, encoding='utf-8',
-                atTime=datetime.time(hour=0, minute=0)
-            ),
-            logging.StreamHandler(sys.stdout)
-        ],
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.DEBUG
-    )
-    logger = logging.getLogger(__name__)
-
-    scheduler = BackgroundScheduler(timezone=CRON_TIMEZONE)
-
     main()
